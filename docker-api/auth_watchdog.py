@@ -116,7 +116,22 @@ async def verify_otp(email: str, otp: str) -> str | None:
                 if m:
                     return m.group(1)
 
-        logger.error(f"OTP verify: no session cookie in response. Body: {r.text[:200]}")
+        # Perplexity devuelve el token en el CUERPO, no siempre como Set-Cookie:
+        # {"is_new_user":false,"status":"success","token":"eyJhbGciOiJkaXIi..."}
+        # Verificado el 2026-08-17: el OTP se pedia, el Worker lo capturaba y la
+        # verificacion respondia 200 con el token adentro, pero se descartaba por
+        # buscar solo la cookie -- el re-login fallaba con todo lo demas correcto.
+        try:
+            data = r.json()
+        except Exception:
+            data = None
+        if isinstance(data, dict):
+            tok = data.get("token") or data.get("session_token") or data.get("sessionToken")
+            if tok:
+                logger.info("OTP verify: token tomado del cuerpo (sin Set-Cookie)")
+                return tok
+
+        logger.error(f"OTP verify: sin token ni en cookie ni en cuerpo. Body: {r.text[:200]}")
         return None
     except Exception as e:
         logger.error(f"OTP verify exception: {e}")
