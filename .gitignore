@@ -1,0 +1,16 @@
+# APK y descompilados: 656 MB, no van al repo
+*.xapk
+perplexity_decompiled/
+perplexity_xapk_extracted/
+*.mp3
+
+# Credenciales
+.env
+docker-api/.env
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+cache/

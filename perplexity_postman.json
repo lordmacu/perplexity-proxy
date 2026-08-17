@@ -1,0 +1,2104 @@
+{
+  "info": {
+    "name": "Perplexity API (Android v2.95.0 — decompilado)",
+    "_postman_id": "perplexity-android-2.95.0",
+    "description": "Endpoints extraídos del APK de Perplexity v2.95.0 (RE completo).\n\nAuth: Cookie __Secure-next-auth.session-token\n\nNOVEDAD: POST /rest/sse/perplexity_ask = endpoint principal de búsqueda web\nGET /rest/models/config/v2 = 124 modelos de 11 providers\nGET /rest/models/modes = modos con tiers\nPOST /rest/uploads/create_upload_url = imágenes (Pro)\n\nFree tier: solo turbo. Imágenes: rate_limited en free.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://www.perplexity.ai",
+      "description": "URL base de la API"
+    },
+    {
+      "key": "session_token",
+      "value": "",
+      "description": "Valor del cookie __Secure-next-auth.session-token (obtenlo de DevTools después de hacer login en perplexity.ai)"
+    },
+    {
+      "key": "thread_uuid",
+      "value": "",
+      "description": "UUID del thread actual (se genera automáticamente en el pre-request script del chat)"
+    },
+    {
+      "key": "provider",
+      "value": "turbo",
+      "description": "Modelo: turbo (free) | gpt4o | claude46sonnet | gemini25pro | grok4 (todos caen a turbo en free)"
+    }
+  ],
+  "item": [
+    {
+      "name": "🔐 Autenticación",
+      "item": [
+        {
+          "name": "1. Iniciar sesión con Email (enviar link)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/auth/signin-email",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "signin-email"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"tu@email.com\",\n  \"redirect\": false,\n  \"callbackUrl\": \"https://www.perplexity.ai\",\n  \"csrfToken\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Envía un magic link al email. El usuario hace click en el link y se genera el session token.\n\nPara obtener el csrfToken, primero visita: GET /api/auth/csrf"
+          }
+        },
+        {
+          "name": "1b. Iniciar sesión con OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/auth/signin-otp",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "signin-otp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"tu@email.com\",\n  \"otp\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "2. Verificación telefónica — Enviar SMS",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/auth/phone-verification/send",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "phone-verification",
+                "send"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone_number\": \"+1234567890\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "2b. Verificación telefónica — Verificar código",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/auth/phone-verification/verify",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "phone-verification",
+                "verify"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone_number\": \"+1234567890\",\n  \"code\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "3. Estado de verificación telefónica",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/auth/phone-verification/status",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "phone-verification",
+                "status"
+              ]
+            }
+          }
+        },
+        {
+          "name": "4. TOTP — Estado 2FA",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/auth/totp/status",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "totp",
+                "status"
+              ]
+            }
+          }
+        },
+        {
+          "name": "4b. TOTP — Verificar challenge móvil",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/auth/totp/mobile-challenge-verify",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "totp",
+                "mobile-challenge-verify"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "5. Google Auth — Obtener Nonce",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/google/nonce",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "google",
+                "nonce"
+              ]
+            },
+            "description": "Obtiene un nonce para iniciar el flujo de Google Sign-In"
+          }
+        },
+        {
+          "name": "5b. Google Auth — Verificar Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/google/verify",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "google",
+                "verify"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id_token\": \"<google_id_token>\",\n  \"nonce\": \"<nonce_del_paso_anterior>\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "💬 Chat — Flujo principal",
+      "description": "El flujo de chat usa SSE (Server-Sent Events). La respuesta llega como un stream de líneas `data: {...}`. En Postman puedes ver la respuesta completa al terminar el stream.",
+      "item": [
+        {
+          "name": "🌟 Chat — Nueva pregunta (v3, SSE) ⬅ PRINCIPAL",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// Generar un UUID para el thread si no existe",
+                  "if (!pm.variables.get('thread_uuid') || pm.variables.get('thread_uuid') === '') {",
+                  "    const uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {",
+                  "        const r = Math.random() * 16 | 0;",
+                  "        const v = c === 'x' ? r : (r & 0x3 | 0x8);",
+                  "        return v.toString(16);",
+                  "    });",
+                  "    pm.variables.set('thread_uuid', uuid);",
+                  "    console.log('Nuevo thread UUID:', uuid);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "text/event-stream"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              },
+              {
+                "key": "Referer",
+                "value": "https://www.perplexity.ai/"
+              },
+              {
+                "key": "Origin",
+                "value": "https://www.perplexity.ai"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/search/v3/navigate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "search",
+                "v3",
+                "navigate"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"¿Qué es la inteligencia artificial?\",\n  \"cache_key\": \"{{thread_uuid}}\",\n  \"provider\": \"{{provider}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "**Endpoint principal de chat.** Envía una pregunta y recibe la respuesta como SSE (streaming).\n\n**Campos del body:**\n- `query` (string, requerido): La pregunta del usuario\n- `cache_key` (string, requerido): UUID del thread/conversación. Usa el mismo UUID para follow-ups del mismo hilo\n- `provider` (string, requerido): Modelo a usar\n\n**Modelos disponibles (campo `provider`):**\n- `pplx_pro` — Perplexity Pro (default)\n- `pplx_beta` — Beta\n- `pplx_alpha` — Alpha\n- `pplx_asi` — ASI (modelo propio de Perplexity)\n- `pplx_asi_sonnet` — Claude Sonnet vía Perplexity\n- `pplx_asi_sonnet_thinking` — Claude Sonnet con thinking\n- `pplx_asi_opus` — Claude Opus vía Perplexity\n- `pplx_asi_opus_thinking` — Claude Opus con thinking\n- `pplx_asi_opus_fast` — Claude Opus rápido\n- `pplx_asi_grok_45` — Grok 4.5 vía Perplexity\n- `pplx_asi_kimi` — Kimi vía Perplexity\n- `pplx_asi_kimi_k3` — Kimi K3\n- `pplx_asi_fable_5` — Fable 5 vía Perplexity\n- `pplx_asi_gpt55` — GPT-5.5 vía Perplexity\n- `pplx_asi_qwen` — Qwen vía Perplexity\n- `pplx_asi_glm` — GLM vía Perplexity\n- `pplx_code_interpreter` — Code Interpreter\n\n**Formato de respuesta SSE:**\n```\ndata: {\"uuid\":\"...\",\"step_type\":\"search_results\", ...}\ndata: {\"uuid\":\"...\",\"step_type\":\"answer\", \"content\":\"...\", ...}\ndata: {\"uuid\":\"...\",\"step_type\":\"final\", ...}\n```\n\n**Para follow-up:** Reusar el mismo `cache_key` con una nueva `query`."
+          }
+        },
+        {
+          "name": "Chat — Follow-up en el mismo hilo",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "text/event-stream"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              },
+              {
+                "key": "Referer",
+                "value": "https://www.perplexity.ai/"
+              },
+              {
+                "key": "Origin",
+                "value": "https://www.perplexity.ai"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/search/v3/navigate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "search",
+                "v3",
+                "navigate"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"¿Puedes explicarlo con más detalle?\",\n  \"cache_key\": \"{{thread_uuid}}\",\n  \"provider\": \"{{provider}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Para continuar el mismo hilo, usa el mismo `cache_key` que en la pregunta anterior (almacenado en la variable `thread_uuid`)."
+          }
+        },
+        {
+          "name": "Chat — Búsqueda v2 (legacy)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "text/event-stream"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/search/v2/navigate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "search",
+                "v2",
+                "navigate"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"¿Qué es la IA?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Versión v2 del endpoint de búsqueda (legacy). Solo acepta `query`. La app usa v3 por defecto."
+          }
+        },
+        {
+          "name": "Cancelar respuesta en curso (SSE)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/sse/perplexity_terminate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "sse",
+                "perplexity_terminate"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"uuid\": \"{{thread_uuid}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Cancela una respuesta SSE que está en curso."
+          }
+        },
+        {
+          "name": "Respuesta con preguntas aclaratorias (SSE)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "text/event-stream"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/sse/perplexity_clarifying_answer",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "sse",
+                "perplexity_clarifying_answer"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"uuid\": \"{{thread_uuid}}\",\n  \"answer\": \"opcion_seleccionada\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Responde a una pregunta aclaratoria que hizo Perplexity durante un chat."
+          }
+        },
+        {
+          "name": "Autocompletado / Sugerencias",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "https://suggest.perplexity.ai/?q=inteligencia",
+              "protocol": "https",
+              "host": [
+                "suggest",
+                "perplexity",
+                "ai"
+              ],
+              "path": [
+                ""
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "inteligencia",
+                  "description": "Query parcial para autocompletar"
+                }
+              ]
+            },
+            "description": "Sugerencias de búsqueda (autocompletado). Base URL diferente: suggest.perplexity.ai"
+          }
+        }
+      ]
+    },
+    {
+      "name": "📋 Threads (historial)",
+      "item": [
+        {
+          "name": "Listar conversaciones",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/thread/list_ask_threads",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "thread",
+                "list_ask_threads"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Listar conversaciones fijadas",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/thread/list_pinned_ask_threads",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "thread",
+                "list_pinned_ask_threads"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Cambiar título de conversación",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/thread/set_thread_title",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "thread",
+                "set_thread_title"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"thread_id\": \"{{thread_uuid}}\",\n  \"title\": \"Mi conversación sobre IA\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Fijar conversación",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/thread/pin_thread",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "thread",
+                "pin_thread"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"thread_id\": \"{{thread_uuid}}\",\n  \"pinned\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Archivar conversación",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/thread/archive_thread",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "thread",
+                "archive_thread"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"thread_id\": \"{{thread_uuid}}\",\n  \"archived\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Exportar conversación",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/thread/export",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "thread",
+                "export"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"thread_id\": \"{{thread_uuid}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Marcar como visto",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/thread/mark_viewed/{{thread_uuid}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "thread",
+                "mark_viewed",
+                "{{thread_uuid}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Cambiar permisos de acceso al thread",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/thread/update_thread_access",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "thread",
+                "update_thread_access"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"thread_id\": \"{{thread_uuid}}\",\n  \"access\": \"private\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Listar tareas de Computer Use",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/thread/list_computer_tasks",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "thread",
+                "list_computer_tasks"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "📁 Colecciones",
+      "item": [
+        {
+          "name": "Crear colección",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/collections/create_collection",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "collections",
+                "create_collection"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Mi colección de IA\",\n  \"description\": \"Conversaciones sobre inteligencia artificial\",\n  \"is_public\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Editar colección",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/collections/edit_collection/:collection_uuid",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "collections",
+                "edit_collection",
+                ":collection_uuid"
+              ],
+              "variable": [
+                {
+                  "key": "collection_uuid",
+                  "value": "uuid-de-tu-coleccion"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Nuevo título\",\n  \"description\": \"Nueva descripción\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Agregar thread a colección",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/collections/upsert_thread_collection",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "collections",
+                "upsert_thread_collection"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"thread_id\": \"{{thread_uuid}}\",\n  \"collection_uuid\": \"uuid-de-tu-coleccion\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Invitar a colección",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/collections/invite_to_collection",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "collections",
+                "invite_to_collection"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"collection_uuid\": \"uuid-de-tu-coleccion\",\n  \"email\": \"amigo@email.com\",\n  \"permission\": \"contributor\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "📎 Archivos",
+      "item": [
+        {
+          "name": "Listar archivos",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/file-repository/list-files",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "file-repository",
+                "list-files"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Obtener URLs para subir archivos",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/file-repository/get-file-upload-urls",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "file-repository",
+                "get-file-upload-urls"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"files\": [\n    {\n      \"name\": \"documento.pdf\",\n      \"content_type\": \"application/pdf\",\n      \"size\": 102400\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Devuelve URLs pre-firmadas para subir archivos directamente a S3/R2. Luego envías el archivo con PUT a la URL devuelta."
+          }
+        },
+        {
+          "name": "Eliminar archivos",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/file-repository/delete-files",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "file-repository",
+                "delete-files"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"file_uuids\": [\"uuid-del-archivo\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🛒 Shopping",
+      "item": [
+        {
+          "name": "Buscar productos",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/shopping/search-shopping-for-entry",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "shopping",
+                "search-shopping-for-entry"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"auriculares inalámbricos\",\n  \"entry_uuid\": \"{{thread_uuid}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Detalle de producto",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/shopping/fetch-product-details",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "shopping",
+                "fetch-product-details"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_url\": \"https://www.amazon.com/...\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Calcular impuestos y envío",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/shopping/calculate-tax-and-shipping",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "shopping",
+                "calculate-tax-and-shipping"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"order_id\": \"order-uuid\",\n  \"shipping_address\": {\n    \"name\": \"Juan Pérez\",\n    \"line1\": \"Calle 123\",\n    \"city\": \"Bogotá\",\n    \"country\": \"CO\",\n    \"postal_code\": \"110111\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🏨 Travel",
+      "item": [
+        {
+          "name": "Buscar disponibilidad de hoteles",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/travel/hotels/search-availability",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "travel",
+                "hotels",
+                "search-availability"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"destination\": \"Cartagena, Colombia\",\n  \"check_in\": \"2026-09-01\",\n  \"check_out\": \"2026-09-05\",\n  \"guests\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Mis reservas",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/travel/hotels/reservations",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "travel",
+                "hotels",
+                "reservations"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🔔 Notificaciones",
+      "item": [
+        {
+          "name": "Registrar dispositivo para push",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/notifications/device/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "notifications",
+                "device",
+                "register"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device_token\": \"<fcm_token>\",\n  \"platform\": \"android\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Marcar notificaciones como leídas",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/notifications/in-app/bulk-read",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "notifications",
+                "in-app",
+                "bulk-read"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"notification_ids\": [\"id1\", \"id2\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "📊 GraphQL (Digest)",
+      "description": "Queries GraphQL con persisted queries (hash SHA-256 en la URL). Requieren autenticación.",
+      "item": [
+        {
+          "name": "Digest — Home",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/graphql/MobileDigestHomeV2RelayQuery/ab8f0a8d45dc3d3091972ea30fae064edb095504a7f7df21d8982c0e7624939f",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "graphql",
+                "MobileDigestHomeV2RelayQuery",
+                "ab8f0a8d45dc3d3091972ea30fae064edb095504a7f7df21d8982c0e7624939f"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"variables\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Persisted GraphQL query. El hash es el SHA-256 de la query original."
+          }
+        },
+        {
+          "name": "Digest — Feed de artículos por fecha",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/graphql/MobileDigestArtifactFeedByDateV2RelayQuery/f1e02a071d8178d85570cda7d25dcde7814701a06d3f3da5abdb5326b467fdf9",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "graphql",
+                "MobileDigestArtifactFeedByDateV2RelayQuery",
+                "f1e02a071d8178d85570cda7d25dcde7814701a06d3f3da5abdb5326b467fdf9"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"variables\": {\n    \"date\": \"2026-08-16\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Digest — Marcar artículo como leído",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/graphql/MobileDigestMarkArtifactRead/568d677568dd50c1db03a13213b605f529e61888ea655cde1aaf7344c9fa8fa5",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "graphql",
+                "MobileDigestMarkArtifactRead",
+                "568d677568dd50c1db03a13213b605f529e61888ea655cde1aaf7344c9fa8fa5"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"variables\": {\n    \"artifactId\": \"id-del-articulo\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🎙️ Voz en tiempo real",
+      "description": "Endpoints para la funcionalidad de voz/realtime (requiere suscripción Pro/Max)",
+      "item": [
+        {
+          "name": "Crear sesión de voz",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/realtime/v2/session",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "realtime",
+                "v2",
+                "session"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"{{provider}}\",\n  \"voice\": \"alloy\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Inicia una sesión de conversación por voz. Retorna tokens/config para conectarse vía WebRTC."
+          }
+        },
+        {
+          "name": "Obtener API key de transcripción (Gemini)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/realtime/v1/transcription/gemini-api-key",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "realtime",
+                "v1",
+                "transcription",
+                "gemini-api-key"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "⚙️ Misc",
+      "item": [
+        {
+          "name": "Discover — Temas",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/discover/topics",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "discover",
+                "topics"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Buscar fuentes",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/sources/search",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "sources",
+                "search"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"inteligencia artificial\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Feedback de respuesta",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/entry/feedback/:entry_uuid",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "entry",
+                "feedback",
+                ":entry_uuid"
+              ],
+              "variable": [
+                {
+                  "key": "entry_uuid",
+                  "value": "{{thread_uuid}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"feedback_type\": \"thumbs_up\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Evento de analytics",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{session_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/p/api/v1/event",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "p",
+                "api",
+                "v1",
+                "event"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_name\": \"search\",\n  \"properties\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Endpoint de telemetría/analytics interno."
+          }
+        }
+      ]
+    },
+    {
+      "name": "🔍 Modelos",
+      "item": [
+        {
+          "name": "GET Catálogo de modelos (config/v2) — 124 modelos",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              },
+              {
+                "key": "User-Agent",
+                "value": "Ask-App/android"
+              },
+              {
+                "key": "x-client-name",
+                "value": "perplexity-android"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/models/config/v2",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "models",
+                "config",
+                "v2"
+              ]
+            },
+            "description": "Devuelve 124+ modelos de 11 providers.\nAPK Source: rp2.java"
+          }
+        },
+        {
+          "name": "GET Modos de búsqueda (tiers)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              },
+              {
+                "key": "User-Agent",
+                "value": "Ask-App/android"
+              },
+              {
+                "key": "x-client-name",
+                "value": "perplexity-android"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/models/modes",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "models",
+                "modes"
+              ]
+            },
+            "description": "Modos: search(free), research(Pro), study(Pro), browser_agent(Max).\nAPK Source: nvm.java"
+          }
+        }
+      ]
+    },
+    {
+      "name": "💬 Chat — Search SSE (/rest/sse/perplexity_ask)",
+      "item": [
+        {
+          "name": "POST Search Ask — gratis (turbo)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              },
+              {
+                "key": "User-Agent",
+                "value": "Ask-App/android"
+              },
+              {
+                "key": "x-client-name",
+                "value": "perplexity-android"
+              },
+              {
+                "key": "x-client-version",
+                "value": "2.9.5"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/sse/perplexity_ask",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "sse",
+                "perplexity_ask"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query_str\": \"¿Cuál es la capital de Colombia?\",\n  \"params\": {\n    \"query_mode\": \"COPILOT\",\n    \"search_mode\": \"search\",\n    \"model_api_name\": \"turbo\",\n    \"search_mode_supports_reasoning\": false,\n    \"frontend_uuid\": \"{{$randomUUID}}\",\n    \"version\": \"2.9\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Búsqueda web SSE. En free tier todos los modelos caen a turbo.\n\nRespuesta SSE:\n- blocks[].markdown_block.chunks[] = texto incremental\n- blocks[].markdown_block.answer = texto completo (en final_sse_message)\n- display_model = modelo real usado\n- final_sse_message: true = último evento\n- status: COMPLETED\n\nAPK Source: pvp.java + fs0.java + es0.java"
+          }
+        },
+        {
+          "name": "POST Search Ask — con imagen (⚠️ requiere Pro + upload S3)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              },
+              {
+                "key": "User-Agent",
+                "value": "Ask-App/android"
+              },
+              {
+                "key": "x-client-name",
+                "value": "perplexity-android"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/sse/perplexity_ask",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "sse",
+                "perplexity_ask"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query_str\": \"Describe this image\",\n  \"params\": {\n    \"query_mode\": \"COPILOT\",\n    \"search_mode\": \"search\",\n    \"model_api_name\": \"claude46sonnet\",\n    \"search_mode_supports_reasoning\": false,\n    \"frontend_uuid\": \"{{$randomUUID}}\",\n    \"version\": \"2.9\",\n    \"attachments\": [\n      {\n        \"type\": \"image\",\n        \"s3_url\": \"REPLACE_S3_URL_FROM_create_upload_url\",\n        \"media_type\": \"image/jpeg\",\n        \"width\": 1024,\n        \"height\": 768,\n        \"file_handle\": \"REPLACE_file_uuid_FROM_upload_response\"\n      }\n    ]\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "REQUIERE PRO. En free tier create_upload_url devuelve rate_limited=true.\n\nFlujo:\n1. POST /rest/uploads/create_upload_url → s3_bucket_url + fields + file_uuid\n2. PUT s3_bucket_url (multipart) → sube imagen\n3. Usa s3_object_url como s3_url aquí\n\nAttachment model (APK): swk.java (RemotePreviewInfo)"
+          }
+        },
+        {
+          "name": "POST Create Upload URL (imágenes — ⚠️ requiere Pro)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "__Secure-next-auth.session-token={{session_token}}"
+              },
+              {
+                "key": "User-Agent",
+                "value": "Ask-App/android"
+              },
+              {
+                "key": "x-client-name",
+                "value": "perplexity-android"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rest/uploads/create_upload_url",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rest",
+                "uploads",
+                "create_upload_url"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"filename\": \"imagen.jpg\",\n  \"content_type\": \"image/jpeg\",\n  \"source\": \"default\",\n  \"file_size\": 204800\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "URL presignada S3 para subir imágenes.\nRespuesta: {s3_bucket_url, s3_object_url, fields, rate_limited, file_uuid}\n\nFree tier: rate_limited=true, URLs null.\nAPK Source: uoq.java, kdk.java (request), ndk.java (response)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "🤖 OpenAI Proxy (localhost:8000)",
+      "item": [
+        {
+          "name": "POST /v1/chat/completions (Search — recomendado)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:8000/v1/chat/completions",
+              "host": [
+                "localhost"
+              ],
+              "port": "8000",
+              "path": [
+                "v1",
+                "chat",
+                "completions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"turbo\",\n  \"messages\": [\n    {\"role\": \"user\", \"content\": \"¿Quién ganó la Copa del Mundo 2022?\"}\n  ],\n  \"stream\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Routing automático: modelos no-Gemini → Perplexity Search SSE.\nEn free tier todos caen a turbo.\n_pplx.display_model muestra el modelo real."
+          }
+        },
+        {
+          "name": "POST /v1/chat/completions (Gemini Live)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:8000/v1/chat/completions",
+              "host": [
+                "localhost"
+              ],
+              "port": "8000",
+              "path": [
+                "v1",
+                "chat",
+                "completions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"perplexity-gemini-live\",\n  \"messages\": [\n    {\"role\": \"user\", \"content\": \"Hola, cuéntame un dato curioso\"}\n  ],\n  \"stream\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Gemini 3.1 Flash Live Preview vía Perplexity.\nModelos: perplexity-gemini-live, perplexity-gemini-live-charon, -fenrir, -zephyr"
+          }
+        },
+        {
+          "name": "POST /v1/audio/speech (TTS)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:8000/v1/audio/speech",
+              "host": [
+                "localhost"
+              ],
+              "port": "8000",
+              "path": [
+                "v1",
+                "audio",
+                "speech"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"perplexity-tts\",\n  \"input\": \"Hola, este es un texto de prueba.\",\n  \"voice\": \"alloy\",\n  \"response_format\": \"mp3\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "TTS via Perplexity SSE. Devuelve MP3.\nVoces: alloy, echo, cedar, fable, onyx, nova, shimmer, coral"
+          }
+        },
+        {
+          "name": "GET /v1/models",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8000/v1/models",
+              "host": [
+                "localhost"
+              ],
+              "port": "8000",
+              "path": [
+                "v1",
+                "models"
+              ]
+            },
+            "description": "124+ modelos dinámicos + 5 propios del proxy."
+          }
+        },
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8000/health",
+              "host": [
+                "localhost"
+              ],
+              "port": "8000",
+              "path": [
+                "health"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /perplexity/search (búsqueda nativa)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:8000/perplexity/search",
+              "host": [
+                "localhost"
+              ],
+              "port": "8000",
+              "path": [
+                "perplexity",
+                "search"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"¿Cuándo fue el último eclipse solar total?\",\n  \"model\": \"turbo\",\n  \"search_mode\": \"search\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Búsqueda nativa simplificada. Campo 'query' directamente (sin messages array).\nDevuelve: {answer, display_model, status}"
+          }
+        }
+      ]
+    }
+  ]
+}
