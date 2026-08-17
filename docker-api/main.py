@@ -9,7 +9,7 @@ import logging
 
 from config import settings
 from token_manager import TokenManager
-from auth_watchdog import watchdog_loop
+from auth_watchdog import watchdog_loop, cargar_token_del_cache
 from routers import v1_chat, v1_audio, v1_models, perplexity, v1_search, v1_auth
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -18,6 +18,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.token_manager = TokenManager()
+    # Antes que nada: recuperar la sesion del volumen si el entorno no trae
+    # una. Va aca y no en el watchdog a proposito -- con AUTH_WATCHDOG=false
+    # el proxy igual debe aprovechar un token cacheado en vez de quedarse
+    # anonimo teniendo uno valido a mano.
+    cargar_token_del_cache()
     watchdog_task = None
     if settings.auth_watchdog:
         watchdog_task = asyncio.create_task(watchdog_loop(), name="auth_watchdog")

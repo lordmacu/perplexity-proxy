@@ -187,8 +187,20 @@ async def verify_otp(email: str, otp: str) -> str | None:
 
 
 def update_session_token(new_token: str):
-    """Actualiza el token en memoria y en el .env."""
+    """Actualiza el token en memoria, en el cache persistente y en el .env."""
     settings.perplexity_session = new_token
+
+    # Cache persistente: es lo unico que sobrevive a un redeploy del contenedor.
+    # El .env de abajo vive dentro de la imagen y se pierde en cada despliegue.
+    try:
+        cache = Path(settings.session_cache_path)
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(new_token)
+        logger.info("Sesion: token guardado en el cache persistente (%s)", cache)
+    except Exception as e:
+        logger.warning("Sesion: no se pudo escribir el cache %s (%s: %s) — el token "
+                       "sobrevive en memoria pero NO a un reinicio",
+                       settings.session_cache_path, type(e).__name__, str(e)[:80])
 
     env_path = Path(__file__).parent / ".env"
     if env_path.exists():
@@ -233,6 +245,34 @@ async def auto_relogin() -> bool:
     update_session_token(new_token)
     logger.info("Sesion: re-login OK, token nuevo de %d chars guardado", len(new_token))
     return True
+
+
+def cargar_token_del_cache() -> bool:
+    """Levanta el token del cache persistente si el entorno no trae uno usable.
+
+    Orden deliberado: el ENTORNO gana sobre el cache. Si el operador puso un
+    PERPLEXITY_SESSION a mano en Coolify, esa es una decision explicita y no la
+    puede pisar un archivo viejo del volumen. El cache existe para el caso
+    contrario: sobrevivir a un redeploy cuando nadie toco nada.
+    """
+    actual = settings.perplexity_session
+    if actual and actual != "your_session_token_here":
+        return False
+    try:
+        cache = Path(settings.session_cache_path)
+        if not cache.exists():
+            return False
+        tok = cache.read_text().strip()
+        if not tok:
+            return False
+        settings.perplexity_session = tok
+        logger.info("Sesion: token recuperado del cache persistente (%d chars) — "
+                    "no hace falta un OTP nuevo", len(tok))
+        return True
+    except Exception as e:
+        logger.warning("Sesion: no se pudo leer el cache %s (%s: %s)",
+                       settings.session_cache_path, type(e).__name__, str(e)[:80])
+        return False
 
 
 async def watchdog_loop():
