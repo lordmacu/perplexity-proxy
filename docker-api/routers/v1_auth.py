@@ -100,11 +100,25 @@ async def verify_otp(body: VerifyOtpBody):
     if r.status_code not in (200, 201):
         raise HTTPException(status_code=r.status_code, detail=r.text[:300])
 
+    # Perplexity devuelve el token en el CUERPO, no siempre como Set-Cookie:
+    # {"is_new_user":false,"status":"success","token":"eyJhbGciOiJkaXIi..."}
+    # Sin esto el endpoint respondia "OTP incorrecto o expirado" con un OTP
+    # perfectamente valido -- un diagnostico que manda a buscar donde no es.
+    if not session_cookie:
+        try:
+            data = r.json()
+        except Exception:
+            data = None
+        if isinstance(data, dict):
+            session_cookie = (data.get("token") or data.get("session_token")
+                              or data.get("sessionToken"))
+
     if not session_cookie:
         return {
             "status": "error",
-            "message": "OTP incorrecto o expirado",
+            "message": "OTP incorrecto o expirado, o la respuesta no traia token",
             "raw_status": r.status_code,
+            "body": r.text[:200],
         }
 
     return {
