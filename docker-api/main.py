@@ -7,6 +7,7 @@ from fastapi.openapi.utils import get_openapi
 import asyncio
 import logging
 
+from config import settings
 from token_manager import TokenManager
 from auth_watchdog import watchdog_loop
 from routers import v1_chat, v1_audio, v1_models, perplexity, v1_search, v1_auth
@@ -17,13 +18,20 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.token_manager = TokenManager()
-    watchdog_task = asyncio.create_task(watchdog_loop(), name="auth_watchdog")
+    watchdog_task = None
+    if settings.auth_watchdog:
+        watchdog_task = asyncio.create_task(watchdog_loop(), name="auth_watchdog")
+    else:
+        logging.getLogger("auth_watchdog").info(
+            "AUTH_WATCHDOG=false — re-login OTP desactivado; el proxy corre en modo anonimo"
+        )
     yield
-    watchdog_task.cancel()
-    try:
-        await watchdog_task
-    except asyncio.CancelledError:
-        pass
+    if watchdog_task is not None:
+        watchdog_task.cancel()
+        try:
+            await watchdog_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(

@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     mailgun_key: str = ""
     perplexity_email: str = ""          # email para auto-login OTP
     session_check_interval: int = 1800  # segundos entre chequeos (default 30 min)
+    # Interruptor del re-login automatico por OTP. Encendido por defecto para no
+    # cambiar el comportamiento existente; ponerlo en false cuando Perplexity este
+    # rate-limitando los OTP (reintentar solo empeora el bloqueo) o cuando se quiera
+    # correr el proxy en modo anonimo, que no necesita sesion.
+    auth_watchdog: bool = True
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
