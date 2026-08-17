@@ -37,19 +37,38 @@ def _cookie_header() -> dict:
 
 
 async def check_session() -> bool:
-    """Devuelve True si el session token actual es válido."""
-    if not settings.perplexity_session or settings.perplexity_session == "your_session_token_here":
+    """Devuelve True si el session token actual es válido.
+
+    Loguea el MOTIVO de cada respuesta: un "invalido o expirado" sin causa
+    obliga a adivinar entre token ausente, token rechazado y red caida, que
+    son tres problemas distintos con tres arreglos distintos.
+    """
+    tok = settings.perplexity_session
+    if not tok or tok == "your_session_token_here":
+        logger.info("Sesion: no hay token configurado (PERPLEXITY_SESSION vacio)")
         return False
+    logger.debug("Sesion: probando token de %d chars", len(tok))
     try:
         async with AsyncSession(impersonate="chrome120") as s:
             r = await s.get(SESSION_CHECK_URL, headers=_cookie_header(), timeout=10)
         if r.status_code != 200:
-            logger.warning(f"Session check HTTP {r.status_code}")
+            logger.warning("Sesion: rechazada con HTTP %s — cuerpo: %s",
+                           r.status_code, r.text[:120])
             return False
         data = r.json()
-        return bool(data.get("user") or data.get("accessToken"))
+        ok = bool(data.get("user") or data.get("accessToken"))
+        if not ok:
+            # 200 pero sin identidad: el token existe y no sirve. Sin las claves
+            # que SI vinieron es imposible saber si cambio el contrato.
+            logger.warning("Sesion: HTTP 200 sin user ni accessToken — claves: %s",
+                           sorted(data.keys()) if isinstance(data, dict) else type(data).__name__)
+        else:
+            logger.info("Sesion: valida")
+        return ok
     except Exception as e:
-        logger.warning(f"Session check failed: {e}")
+        logger.warning("Sesion: no se pudo verificar (%s: %s) — se asume valida "
+                       "para no disparar un re-login por un problema de red",
+                       type(e).__name__, str(e)[:100])
         return False  # no disparar re-login por error de red
 
 
@@ -64,10 +83,25 @@ async def request_otp(email: str) -> bool:
                 timeout=15,
             )
         ok = r.status_code in (200, 201)
-        logger.info(f"OTP request → {r.status_code}: {r.text[:80]}")
+        if ok:
+            logger.info("OTP: pedido enviado a %s", email)
+        elif r.status_code == 429:
+            # El rate limit de Perplexity es la causa mas comun de que el
+            # re-login falle, y es TRANSITORIO: distinguirlo de un fallo real
+            # evita salir a buscar un problema que no existe.
+            espera = r.headers.get("retry-after") or r.headers.get("Retry-After")
+            logger.warning(
+                "OTP: Perplexity limito el pedido (429). Es transitorio; "
+                "reintento en el proximo ciclo (%ss)%s",
+                settings.session_check_interval,
+                f", el servidor sugiere esperar {espera}s" if espera else "",
+            )
+        else:
+            logger.error("OTP: el pedido fallo con HTTP %s — cuerpo: %s",
+                         r.status_code, r.text[:120])
         return ok
     except Exception as e:
-        logger.error(f"OTP request failed: {e}")
+        logger.error("OTP: el pedido fallo (%s: %s)", type(e).__name__, str(e)[:120])
         return False
 
 
@@ -91,7 +125,13 @@ async def poll_otp(email: str, timeout: int = 90) -> str | None:
                 if data.get("status") == "ready":
                     return data["otp"]
             except Exception as e:
-                logger.warning(f"Poll OTP error: {e}")
+                logger.warning("OTP: error consultando el Worker (%s: %s)",
+                               type(e).__name__, str(e)[:100])
+    # Sin este log, un OTP que nunca llega es indistinguible de un Worker caido
+    # o de un email que Mailgun no entrego: tres causas, un mismo silencio.
+    logger.error("OTP: no llego en %ss. Revisar (1) que Mailgun entregue a %s, "
+                 "(2) que el Worker %s este vivo, (3) que OTP_SECRET coincida "
+                 "entre proxy y Worker", timeout, email, settings.otp_worker_url)
     return None
 
 
@@ -128,10 +168,18 @@ async def verify_otp(email: str, otp: str) -> str | None:
         if isinstance(data, dict):
             tok = data.get("token") or data.get("session_token") or data.get("sessionToken")
             if tok:
-                logger.info("OTP verify: token tomado del cuerpo (sin Set-Cookie)")
+                logger.info("OTP: token obtenido del CUERPO (%d chars), sin Set-Cookie",
+                            len(tok))
                 return tok
+            # Logueamos las CLAVES, nunca los valores: si Perplexity renombra el
+            # campo, esto lo dice en una linea en vez de costar una sesion de
+            # sondeo a ciegas.
+            logger.error("OTP: la respuesta no traia token. Claves recibidas: %s",
+                         sorted(data.keys()))
+            return None
 
-        logger.error(f"OTP verify: sin token ni en cookie ni en cuerpo. Body: {r.text[:200]}")
+        logger.error("OTP: sin token ni en cookie ni en cuerpo, y el cuerpo no es JSON. "
+                     "Primeros bytes: %s", r.text[:150])
         return None
     except Exception as e:
         logger.error(f"OTP verify exception: {e}")
@@ -173,14 +221,17 @@ async def auto_relogin() -> bool:
         logger.error("OTP no llegó en el tiempo límite")
         return False
 
-    logger.info(f"OTP recibido: {otp}")
+    # Enmascarado: es una credencial de un solo uso y los logs de un contenedor
+    # se leen, se copian y se pegan en un chat. Los ultimos 2 digitos alcanzan
+    # para correlacionar con el email si hace falta.
+    logger.info("OTP: recibido del Worker (termina en %s)", otp[-2:] if len(otp) >= 2 else "??")
     new_token = await verify_otp(email, otp)
     if not new_token:
         logger.error("Verificación del OTP falló")
         return False
 
     update_session_token(new_token)
-    logger.info("Re-autenticación exitosa — nuevo session token guardado")
+    logger.info("Sesion: re-login OK, token nuevo de %d chars guardado", len(new_token))
     return True
 
 
@@ -196,7 +247,7 @@ async def watchdog_loop():
         try:
             valid = await check_session()
             if valid:
-                logger.info("Session token OK")
+                logger.info("Sesion OK — proximo chequeo en %ss", interval)
             else:
                 logger.warning("Session token inválido o expirado — iniciando re-login")
                 success = await auto_relogin()
