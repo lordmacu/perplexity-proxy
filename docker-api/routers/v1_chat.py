@@ -5,13 +5,18 @@ Routing automático por modelo:
   - perplexity-gemini-live*  → Gemini Live WebSocket (audio→transcripción)
   - cualquier otro modelo    → Perplexity Search SSE (/rest/sse/perplexity_ask)
 
-En free tier, todos los modelos no-Gemini caen a 'turbo'.
+Conversaciones multi-turno (Perplexity backend):
+  Cada respuesta entrega backend_uuid + read_write_token. Los guardamos en
+  _THREAD_CACHE indexados por SHA-256 del historial completo (incluyendo la
+  respuesta del asistente). El siguiente turno busca por SHA-256 de
+  messages[:-1] y, si hay hit, envía last_backend_uuid + is_related_query=true
+  para que Perplexity mantenga el hilo server-side.
 """
 
 
 from __future__ import annotations
 
-import asyncio
+import hashlib
 import json
 import time
 import uuid
@@ -36,6 +41,59 @@ GEMINI_LIVE_MODELS = {
 }
 
 router = APIRouter()
+
+# ── Thread cache ───────────────────────────────────────────────────────────────
+# key  → SHA-256(messages incluyendo última respuesta del asistente)
+# value → {backend_uuid, read_write_token, device_id, expires}
+_THREAD_CACHE: dict[str, dict] = {}
+_THREAD_TTL = 3600  # 1 h
+
+
+def _cache_key(messages: list[ChatMessage]) -> str:
+    raw = json.dumps(
+        [{"r": m.role, "c": m.content.strip()} for m in messages],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _get_thread(messages: list[ChatMessage]) -> tuple[str | None, str | None, str]:
+    """Busca estado previo del hilo. Devuelve (backend_uuid, rwt, device_id)."""
+    prior = messages[:-1]
+    if not prior:
+        return None, None, str(uuid.uuid4())
+    key = _cache_key(prior)
+    state = _THREAD_CACHE.get(key)
+    if state and state["expires"] > time.time():
+        return state["backend_uuid"], state.get("read_write_token"), state["device_id"]
+    return None, None, str(uuid.uuid4())
+
+
+def _save_thread(
+    messages: list[ChatMessage],
+    response_content: str,
+    backend_uuid: str,
+    read_write_token: str | None,
+    device_id: str,
+) -> None:
+    if not backend_uuid:
+        return
+    all_msgs = list(messages) + [
+        ChatMessage(role="assistant", content=response_content.strip())
+    ]
+    key = _cache_key(all_msgs)
+    now = time.time()
+    _THREAD_CACHE[key] = {
+        "backend_uuid": backend_uuid,
+        "read_write_token": read_write_token,
+        "device_id": device_id,
+        "expires": now + _THREAD_TTL,
+    }
+    # Limpieza de entradas expiradas
+    expired = [k for k, v in list(_THREAD_CACHE.items()) if v["expires"] <= now]
+    for k in expired:
+        _THREAD_CACHE.pop(k, None)
 
 
 # ── Modelos de request/response ───────────────────────────────────────────────
@@ -79,29 +137,14 @@ class ChatCompletionRequest(BaseModel):
             "`false` → espera la respuesta completa."
         ),
     )
-    temperature: float | None = Field(
-        None,
-        description="✗ **No soportado**. Gemini Live no expone temperatura en este endpoint constrained.",
-    )
-    max_tokens: int | None = Field(
-        None,
-        description="✗ **No soportado**. La longitud de respuesta la decide el modelo.",
-    )
+    temperature: float | None = Field(None, description="✗ No soportado.")
+    max_tokens: int | None = Field(None, description="✗ No soportado.")
     top_p: float | None = Field(None, description="✗ No soportado.")
     frequency_penalty: float | None = Field(None, description="✗ No soportado.")
     presence_penalty: float | None = Field(None, description="✗ No soportado.")
     stop: list[str] | None = Field(None, description="✗ No soportado.")
-    n: int | None = Field(
-        None, description="✗ No soportado. Siempre devuelve 1 completion."
-    )
-    tools: list | None = Field(
-        None,
-        description=(
-            "✗ **No soportado** en formato OpenAI. "
-            "Gemini Live tiene `search_web` interno de Perplexity, "
-            "activable vía `/perplexity/realtime/execute-tools`."
-        ),
-    )
+    n: int | None = Field(None, description="✗ No soportado. Siempre devuelve 1 completion.")
+    tools: list | None = Field(None, description="✗ No soportado.")
     functions: list | None = Field(None, description="✗ No soportado (legacy).")
     logprobs: bool | None = Field(None, description="✗ No soportado.")
     x_voice: str | None = Field(
@@ -160,6 +203,31 @@ def _chunk_event(request_id: str, content: str, finish: str | None = None) -> st
     return f"data: {json.dumps(payload)}\n\n"
 
 
+def _build_search_body(
+    query: str,
+    model: str,
+    request_id: str,
+    device_id: str,
+    last_backend_uuid: str | None,
+    read_write_token: str | None,
+) -> dict:
+    params: dict = {
+        "query_mode": "COPILOT",
+        "search_mode": "search",
+        "model_api_name": model,
+        "search_mode_supports_reasoning": False,
+        "frontend_uuid": request_id,
+        "version": "2.9",
+        "android_device_id": device_id,
+        "is_related_query": last_backend_uuid is not None,
+    }
+    if last_backend_uuid:
+        params["last_backend_uuid"] = last_backend_uuid
+    if read_write_token:
+        params["read_write_token"] = read_write_token
+    return {"query_str": query, "params": params}
+
+
 # ── Lógica Gemini Live ────────────────────────────────────────────────────────
 
 async def _gemini_stream(
@@ -190,7 +258,6 @@ async def _gemini_stream(
                 },
             }))
 
-            # esperar setupComplete
             async for raw in ws:
                 msg = json.loads(raw)
                 if "setupComplete" in msg:
@@ -198,7 +265,6 @@ async def _gemini_stream(
 
             token_manager.mark_used()
 
-            # enviar todos los turnos
             await ws.send(json.dumps({
                 "client_content": {
                     "turns": turns,
@@ -206,7 +272,6 @@ async def _gemini_stream(
                 }
             }))
 
-            # emitir primer chunk con role
             yield _chunk_event(request_id, "", None)
 
             async for raw in ws:
@@ -305,20 +370,16 @@ async def _search_stream_chat(
     messages: list[ChatMessage],
     model: str,
     request_id: str,
+    device_id: str,
+    last_backend_uuid: str | None,
+    read_write_token: str | None,
 ) -> AsyncGenerator[str, None]:
     user_msgs = [m for m in messages if m.role == "user"]
     query = user_msgs[-1].content if user_msgs else ""
-    body = {
-        "query_str": query,
-        "params": {
-            "query_mode": "COPILOT",
-            "search_mode": "search",
-            "model_api_name": model,
-            "search_mode_supports_reasoning": False,
-            "frontend_uuid": request_id,
-            "version": "2.9",
-        },
-    }
+    body = _build_search_body(query, model, request_id, device_id, last_backend_uuid, read_write_token)
+
+    accumulated: list[str] = []
+
     async with AsyncSession(impersonate="chrome120") as s:
         async with s.stream("POST", _SEARCH_URL, headers=_pplx_headers(),
                             json=body, timeout=60) as resp:
@@ -327,7 +388,6 @@ async def _search_stream_chat(
                 return
             _emitido = ""
             async for raw in resp.aiter_lines():
-                # curl_cffi entrega bytes, no str: decodificar antes de tocar el texto.
                 if isinstance(raw, (bytes, bytearray)):
                     raw = raw.decode("utf-8", "replace")
                 raw = raw.strip()
@@ -337,9 +397,6 @@ async def _search_stream_chat(
                     evt = json.loads(raw[5:].strip())
                 except Exception:
                     continue
-                # Perplexity manda los bloques ACUMULADOS en cada evento, asi que
-                # re-emitirlos tal cual duplica la respuesta. Se arma el texto completo
-                # del evento y se emite solo lo que todavia no se envio.
                 completo = "".join(
                     chunk
                     for block in evt.get("blocks", [])
@@ -349,37 +406,50 @@ async def _search_stream_chat(
                 if completo.startswith(_emitido):
                     nuevo = completo[len(_emitido):]
                 else:
-                    # Forma inesperada: emitir de mas antes que tragarse la respuesta.
                     nuevo = completo
                 if nuevo:
                     _emitido = completo if completo.startswith(_emitido) else _emitido + nuevo
-                    delta = {"id": request_id, "object": "chat.completion.chunk",
-                             "model": evt.get("display_model", model),
-                             "choices": [{"index": 0, "delta": {"content": nuevo}, "finish_reason": None}]}
+                    accumulated.append(nuevo)
+                    delta = {
+                        "id": request_id,
+                        "object": "chat.completion.chunk",
+                        "model": evt.get("display_model", model),
+                        "choices": [{"index": 0, "delta": {"content": nuevo}, "finish_reason": None}],
+                    }
                     yield f"data: {json.dumps(delta)}\n\n"
                 if evt.get("final_sse_message"):
-                    stop = {"id": request_id, "object": "chat.completion.chunk",
-                            "model": evt.get("display_model", model),
-                            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-                            "_pplx": {"display_model": evt.get("display_model"), "status": evt.get("status")}}
+                    # Persistir estado del hilo para el siguiente turno
+                    final_uuid = evt.get("backend_uuid", "")
+                    final_rwt = evt.get("read_write_token")
+                    _save_thread(messages, "".join(accumulated), final_uuid, final_rwt, device_id)
+
+                    stop = {
+                        "id": request_id,
+                        "object": "chat.completion.chunk",
+                        "model": evt.get("display_model", model),
+                        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                        "_pplx": {
+                            "display_model": evt.get("display_model"),
+                            "status": evt.get("status"),
+                            "backend_uuid": final_uuid,
+                        },
+                    }
                     yield f"data: {json.dumps(stop)}\n\ndata: [DONE]\n\n"
                     return
 
 
-async def _search_sync_chat(messages: list[ChatMessage], model: str, request_id: str) -> dict:
+async def _search_sync_chat(
+    messages: list[ChatMessage],
+    model: str,
+    request_id: str,
+    device_id: str,
+    last_backend_uuid: str | None,
+    read_write_token: str | None,
+) -> dict:
     user_msgs = [m for m in messages if m.role == "user"]
     query = user_msgs[-1].content if user_msgs else ""
-    body = {
-        "query_str": query,
-        "params": {
-            "query_mode": "COPILOT",
-            "search_mode": "search",
-            "model_api_name": model,
-            "search_mode_supports_reasoning": False,
-            "frontend_uuid": request_id,
-            "version": "2.9",
-        },
-    }
+    body = _build_search_body(query, model, request_id, device_id, last_backend_uuid, read_write_token)
+
     async with AsyncSession(impersonate="chrome120") as s:
         r = await s.post(_SEARCH_URL, headers=_pplx_headers(), json=body, timeout=60)
         if r.status_code != 200:
@@ -396,8 +466,17 @@ async def _search_sync_chat(messages: list[ChatMessage], model: str, request_id:
             if evt.get("display_model"):
                 display_model = evt["display_model"]
             if evt.get("final_sse_message"):
-                return {"content": _extract_answer(evt.get("blocks", [])),
-                        "display_model": display_model, "status": evt.get("status")}
+                content = _extract_answer(evt.get("blocks", []))
+                backend_uuid = evt.get("backend_uuid", "")
+                rwt = evt.get("read_write_token")
+                # Persistir estado del hilo para el siguiente turno
+                _save_thread(messages, content, backend_uuid, rwt, device_id)
+                return {
+                    "content": content,
+                    "display_model": display_model,
+                    "status": evt.get("status"),
+                    "backend_uuid": backend_uuid,
+                }
     raise HTTPException(status_code=502, detail="No final_sse_message received")
 
 
@@ -405,7 +484,18 @@ async def _search_sync_chat(messages: list[ChatMessage], model: str, request_id:
     "/chat/completions",
     summary="Chat Completions (Search + Gemini Live)",
     description="""
-OpenAI-compatible endpoint con **routing automático** por modelo.
+OpenAI-compatible endpoint con **routing automático** por modelo y soporte de
+**conversaciones multi-turno** para el backend Perplexity Search.
+
+### Cómo funciona el threading
+
+El servidor mantiene un caché en memoria (TTL 1 h) que asocia el historial de
+mensajes con el `backend_uuid` + `read_write_token` de la última respuesta de
+Perplexity. En cada follow-up envía `last_backend_uuid` + `is_related_query=true`
+para que Perplexity mantenga el hilo server-side — igual que la app Android.
+
+No se requiere ningún campo extra: el cliente solo necesita pasar los mensajes
+en formato OpenAI estándar (incluyendo los turnos anteriores del asistente).
 
 ### Routing
 
@@ -416,17 +506,7 @@ OpenAI-compatible endpoint con **routing automático** por modelo.
 | `perplexity-gemini-live` | **Gemini Live** WebSocket | Audio → transcripción |
 | `perplexity-gemini-live-charon/fenrir/zephyr` | **Gemini Live** (voz específica) | |
 
-### Perplexity Search (todos los modelos no-Gemini)
-- Búsqueda web real con fuentes indexadas
-- Texto puro — sin audio/transcripción
-- `_pplx.display_model` en respuesta muestra el modelo real ejecutado
-
-### Gemini Live (solo `perplexity-gemini-live*`)
-- Audio → transcripción (puede tener errores ortográficos)
-- Soporta `x-voice`: `Aoede` | `Charon` | `Fenrir` | `Zephyr`
-- Requiere token de Gemini activo
-
-**Source APK:** `pvp.java` + `fs0.java` + `es0.java` (search) | `fvi.java` (Gemini Live)
+**Source APK:** `hs0.java` (params) | `fs0.java` + `es0.java` (search SSE) | `fvi.java` (Gemini Live)
 """,
 )
 async def chat_completions(
@@ -458,22 +538,37 @@ async def chat_completions(
                       "_note": "Token counts not available — Gemini Live constrained endpoint."},
         }
 
-    # Search backend (default)
+    # Search backend — recuperar estado de hilo si existe
     user_msgs = [m for m in body.messages if m.role == "user"]
     if not user_msgs:
         raise HTTPException(status_code=400, detail="Se requiere al menos un mensaje con rol 'user'.")
+
+    last_backend_uuid, read_write_token, device_id = _get_thread(body.messages)
+
     if body.stream:
         return StreamingResponse(
-            _search_stream_chat(body.messages, body.model, request_id),
+            _search_stream_chat(
+                body.messages, body.model, request_id,
+                device_id, last_backend_uuid, read_write_token,
+            ),
             media_type="text/event-stream",
             headers={"X-Accel-Buffering": "no"},
         )
-    result = await _search_sync_chat(body.messages, body.model, request_id)
+
+    result = await _search_sync_chat(
+        body.messages, body.model, request_id,
+        device_id, last_backend_uuid, read_write_token,
+    )
     return {
         "id": request_id, "object": "chat.completion", "created": int(time.time()),
         "model": result["display_model"],
         "choices": [{"index": 0, "message": {"role": "assistant", "content": result["content"]}, "finish_reason": "stop"}],
         "usage": {"prompt_tokens": -1, "completion_tokens": -1, "total_tokens": -1,
                   "_note": "Token counts unavailable from Perplexity search SSE."},
-        "_pplx": {"display_model": result["display_model"], "status": result["status"]},
+        "_pplx": {
+            "display_model": result["display_model"],
+            "status": result["status"],
+            "backend_uuid": result.get("backend_uuid", ""),
+            "thread": "follow-up" if last_backend_uuid else "new",
+        },
     }
