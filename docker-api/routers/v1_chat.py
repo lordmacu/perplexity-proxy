@@ -203,6 +203,22 @@ def _chunk_event(request_id: str, content: str, finish: str | None = None) -> st
     return f"data: {json.dumps(payload)}\n\n"
 
 
+def _extract_query(messages: list[ChatMessage]) -> str:
+    """Construye el query_str para Perplexity.
+
+    Perplexity no tiene campo nativo de system prompt (confirmado en hs0.java del APK).
+    Si hay mensajes de sistema, los prepende al query del usuario para que el modelo
+    los procese como instrucciones de contexto.
+    """
+    system_parts = [m.content.strip() for m in messages if m.role == "system"]
+    user_msgs = [m for m in messages if m.role == "user"]
+    query = user_msgs[-1].content if user_msgs else ""
+    if system_parts:
+        system_text = "\n".join(system_parts)
+        return f"{system_text}\n\n---\n\n{query}"
+    return query
+
+
 def _build_search_body(
     query: str,
     model: str,
@@ -374,8 +390,7 @@ async def _search_stream_chat(
     last_backend_uuid: str | None,
     read_write_token: str | None,
 ) -> AsyncGenerator[str, None]:
-    user_msgs = [m for m in messages if m.role == "user"]
-    query = user_msgs[-1].content if user_msgs else ""
+    query = _extract_query(messages)
     body = _build_search_body(query, model, request_id, device_id, last_backend_uuid, read_write_token)
 
     accumulated: list[str] = []
@@ -446,8 +461,7 @@ async def _search_sync_chat(
     last_backend_uuid: str | None,
     read_write_token: str | None,
 ) -> dict:
-    user_msgs = [m for m in messages if m.role == "user"]
-    query = user_msgs[-1].content if user_msgs else ""
+    query = _extract_query(messages)
     body = _build_search_body(query, model, request_id, device_id, last_backend_uuid, read_write_token)
 
     async with AsyncSession(impersonate="chrome120") as s:
@@ -539,8 +553,7 @@ async def chat_completions(
         }
 
     # Search backend — recuperar estado de hilo si existe
-    user_msgs = [m for m in body.messages if m.role == "user"]
-    if not user_msgs:
+    if not any(m.role == "user" for m in body.messages):
         raise HTTPException(status_code=400, detail="Se requiere al menos un mensaje con rol 'user'.")
 
     last_backend_uuid, read_write_token, device_id = _get_thread(body.messages)
