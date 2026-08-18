@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     # sesion dura 30 dias (verificado 2026-08-17), asi que perderla por un
     # reinicio es puro desperdicio.
     session_cache_path: str = "/app/cache/session_token.txt"
+    # La sesion trae su propia fecha de vencimiento (~30 dias), asi que el
+    # watchdog duerme HASTA ella en vez de sondear a ciegas cada media hora.
+    session_renew_margin_s: int = 86400   # renovar 1 dia antes de vencer
+    session_check_max_s: int = 43200      # pero nunca dormir mas de 12 h de una
     pplx_base: str = "https://www.perplexity.ai"
     gemini_ws: str = (
         "wss://generativelanguage.googleapis.com/ws/"

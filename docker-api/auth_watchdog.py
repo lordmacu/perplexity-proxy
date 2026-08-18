@@ -11,6 +11,7 @@ import asyncio
 import logging
 import re
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -19,6 +20,11 @@ from curl_cffi.requests import AsyncSession
 from config import settings
 
 logger = logging.getLogger("auth_watchdog")
+
+# Vencimiento de la sesion actual, tal como lo reporta Perplexity en
+# /api/auth/session. Se guarda aparte para no cambiarle la firma a
+# check_session(), que tambien usa el endpoint /auth/status.
+_vence_en: datetime | None = None
 
 SESSION_CHECK_URL = "https://www.perplexity.ai/api/auth/session"
 SIGNIN_URL        = "https://www.perplexity.ai/api/auth/signin-email"
@@ -30,6 +36,32 @@ PPLX_HEADERS = {
     "x-client-version": "2.9.5",
     "Content-Type": "application/json",
 }
+
+
+def _parsear_vencimiento(valor) -> datetime | None:
+    """Convierte el `expires` de Perplexity a datetime, o None si no se entiende.
+
+    Viene como ISO-8601 con Z y nanosegundos ("2026-09-16T23:28:19.936104938Z"),
+    que fromisoformat no acepta: hay que recortar la fraccion a microsegundos.
+    """
+    if not isinstance(valor, str) or not valor:
+        return None
+    try:
+        v = valor.replace("Z", "+00:00")
+        if "." in v:
+            cabeza, resto = v.split(".", 1)
+            frac = "".join(ch for ch in resto if ch.isdigit())[:6]
+            signo = resto[len(frac):] if len(resto) > len(frac) else ""
+            for s in ("+", "-"):
+                if s in resto:
+                    signo = resto[resto.index(s):]
+                    break
+            v = f"{cabeza}.{frac}{signo or '+00:00'}"
+        d = datetime.fromisoformat(v)
+        return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+    except Exception as e:
+        logger.warning("Sesion: no se pudo interpretar expires=%r (%s)", valor, e)
+        return None
 
 
 def _cookie_header() -> dict:
@@ -63,7 +95,14 @@ async def check_session() -> bool:
             logger.warning("Sesion: HTTP 200 sin user ni accessToken — claves: %s",
                            sorted(data.keys()) if isinstance(data, dict) else type(data).__name__)
         else:
-            logger.info("Sesion: valida")
+            global _vence_en
+            _vence_en = _parsear_vencimiento(data.get("expires"))
+            if _vence_en:
+                faltan = (_vence_en - datetime.now(timezone.utc)).total_seconds()
+                logger.info("Sesion: valida, vence en %.1f dias (%s)",
+                            faltan / 86400, data.get("expires"))
+            else:
+                logger.info("Sesion: valida (sin fecha de vencimiento en la respuesta)")
         return ok
     except Exception as e:
         logger.warning("Sesion: no se pudo verificar (%s: %s) — se asume valida "
@@ -275,6 +314,38 @@ def cargar_token_del_cache() -> bool:
         return False
 
 
+def _dentro_del_margen() -> bool:
+    """True si la sesion vence dentro del margen de renovacion."""
+    if _vence_en is None:
+        return False
+    faltan = (_vence_en - datetime.now(timezone.utc)).total_seconds()
+    return faltan <= settings.session_renew_margin_s
+
+
+def _cuanto_dormir(intervalo_por_defecto: int) -> float:
+    """Segundos hasta el proximo chequeo, derivados del vencimiento real.
+
+    Sondear cada 30 min para descubrir algo que la propia respuesta ya dice
+    (la sesion dura ~30 dias) son ~1400 consultas al mes para usar una. Se
+    duerme hasta un dia antes de vencer.
+
+    El TOPE existe igual: una sesion se puede revocar antes de tiempo (cambio de
+    clave, cierre desde otro dispositivo), y dormir 30 dias de un tiron dejaria
+    eso sin detectar hasta el final. Con el tope, lo peor es enterarse 12 h tarde.
+    """
+    if _vence_en is None:
+        return intervalo_por_defecto
+    faltan = (_vence_en - datetime.now(timezone.utc)).total_seconds() - settings.session_renew_margin_s
+    dormir = max(60.0, min(float(settings.session_check_max_s), faltan))
+    if faltan > settings.session_check_max_s:
+        logger.info("Sesion: vence en %.1f dias; proximo chequeo en %.1f h (tope)",
+                    (_vence_en - datetime.now(timezone.utc)).total_seconds() / 86400,
+                    dormir / 3600)
+    else:
+        logger.info("Sesion: cerca del vencimiento, proximo chequeo en %.1f min", dormir / 60)
+    return dormir
+
+
 async def watchdog_loop():
     """Loop que corre cada SESSION_CHECK_INTERVAL segundos."""
     interval = settings.session_check_interval
@@ -286,8 +357,17 @@ async def watchdog_loop():
     while True:
         try:
             valid = await check_session()
-            if valid:
-                logger.info("Sesion OK — proximo chequeo en %ss", interval)
+            if valid and _dentro_del_margen():
+                # Valida pero por vencer: se renueva AHORA, con la sesion todavia
+                # viva. Esperar a que caduque significa una ventana en la que el
+                # proxy no sirve, y encima deja el re-login a merced del rate
+                # limit del OTP justo cuando ya no hay sesion de respaldo.
+                logger.info("Sesion: entra en el margen de renovacion — re-login preventivo")
+                if not await auto_relogin():
+                    logger.warning("Sesion: el re-login preventivo fallo; la sesion actual "
+                                   "sigue siendo valida, se reintenta en el proximo ciclo")
+            elif valid:
+                pass  # el log del proximo chequeo lo emite _cuanto_dormir()
             else:
                 logger.warning("Session token inválido o expirado — iniciando re-login")
                 success = await auto_relogin()
@@ -299,4 +379,4 @@ async def watchdog_loop():
         except Exception as e:
             logger.error(f"AuthWatchdog error inesperado: {e}")
 
-        await asyncio.sleep(interval)
+        await asyncio.sleep(_cuanto_dormir(interval))
