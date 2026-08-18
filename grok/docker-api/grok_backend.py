@@ -482,9 +482,13 @@ def _make_meta() -> list:
 # ── Conversión de mensajes OpenAI → prompt ────────────────────────────────────
 def extract_images_from_messages(messages: list[dict]) -> list[tuple[bytes, str]]:
     """
-    Extrae imágenes base64 de mensajes OpenAI con content tipo lista.
+    Extrae imágenes de mensajes OpenAI con content tipo lista.
     Retorna lista de (image_bytes, mime_type).
-    Soporta: data:image/...;base64,<data> y URLs de datos sin prefijo MIME.
+
+    Formatos soportados (compatibilidad total con OpenAI vision API):
+      - data:image/...;base64,<data>   → decode directo
+      - https://... / http://...        → descarga con requests/urllib
+    El campo `detail` (low/high/auto) se ignora — Grok no lo soporta.
     """
     import base64 as _b64
     images: list[tuple[bytes, str]] = []
@@ -496,14 +500,29 @@ def extract_images_from_messages(messages: list[dict]) -> list[tuple[bytes, str]
             if part.get("type") != "image_url":
                 continue
             url = part.get("image_url", {}).get("url", "")
-            if not url.startswith("data:"):
+            if not url:
                 continue
-            # data:image/png;base64,XXXX
+
             try:
-                header, data = url.split(",", 1)
-                mime = header.split(":")[1].split(";")[0] if ":" in header else "image/jpeg"
-                img_bytes = _b64.b64decode(data)
-                images.append((img_bytes, mime))
+                if url.startswith("data:"):
+                    # data:image/png;base64,XXXX
+                    header, data = url.split(",", 1)
+                    mime = header.split(":")[1].split(";")[0] if ":" in header else "image/jpeg"
+                    img_bytes = _b64.b64decode(data)
+                elif url.startswith("http://") or url.startswith("https://"):
+                    # URL HTTP — descargar imagen
+                    try:
+                        import urllib.request as _ur
+                        with _ur.urlopen(url, timeout=15) as resp:
+                            img_bytes = resp.read()
+                            ct = resp.headers.get("Content-Type", "image/jpeg")
+                            mime = ct.split(";")[0].strip() or "image/jpeg"
+                    except Exception:
+                        continue
+                else:
+                    continue
+                if img_bytes:
+                    images.append((img_bytes, mime))
             except Exception:
                 continue
     return images
