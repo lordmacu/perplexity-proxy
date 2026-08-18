@@ -46,8 +46,13 @@ MODELS_CATALOG = {
 # Pool de rotación para chat: todos los de 999/hora
 HIGH_RATE_POOL = [m for m, info in MODELS_CATALOG.items() if info["rate"] == 999]
 
-# Pool de rotación para imágenes: solo los imagine-agent (los únicos que tienen Aurora)
+# Pool de rotación para generación de imágenes Aurora (imagine-agent-mode)
 IMAGE_POOL = [m for m in MODELS_CATALOG if m.startswith("imagine-agent-mode")]
+
+# Pool de visión (vision): modelos que ven imágenes vía f6 y tienen 999/h
+# Confirmado: grok-plugins-4p6-* y grok-plugins-4p5-* ven imágenes + 999/h
+# imagine-agent-mode* NO ven imágenes vía f6 (usan @asset interno)
+VISION_POOL = [m for m in MODELS_CATALOG if m.startswith("grok-plugins-")]
 
 # Aliases públicos (OpenAI names → modelo interno)
 # None = usa rotación del HIGH_RATE_POOL
@@ -66,6 +71,9 @@ MODEL_ALIASES: dict[str, Optional[str]] = {
 
 # Alias de imagen especial
 IMAGE_ALIASES = {"auto", "auto-image"}
+
+# Alias de visión (OpenAI-compatible vision aliases)
+VISION_ALIASES = {"gpt-4-vision-preview", "gpt-4o-vision", "auto-vision"}
 
 # ── Rotación de modelos ───────────────────────────────────────────────────────
 class _ModelRotator:
@@ -95,20 +103,41 @@ class _ModelRotator:
         return self.next()
 
 
-_rotator       = _ModelRotator(HIGH_RATE_POOL)
-_image_rotator = _ModelRotator(IMAGE_POOL)
+_rotator        = _ModelRotator(HIGH_RATE_POOL)
+_image_rotator  = _ModelRotator(IMAGE_POOL)
+_vision_rotator = _ModelRotator(VISION_POOL)
 
 
 def resolve_model(requested: Optional[str]) -> str:
     # Modelo interno directo → usarlo tal cual
     if requested and requested in MODELS_CATALOG:
         return requested
+    # Alias de visión → pool de plugins (999/h con visión)
+    if requested and requested in VISION_ALIASES:
+        return _vision_rotator.next()
     # Alias OpenAI → mapear o round-robin
     if requested and requested in MODEL_ALIASES:
         mapped = MODEL_ALIASES[requested]
         return mapped if mapped else _rotator.next()
     # Cualquier otra cosa → round-robin
     return _rotator.next()
+
+
+def resolve_vision_model(requested: Optional[str]) -> str:
+    """
+    Igual que resolve_model pero cuando hay imágenes adjuntas:
+    si el modelo pedido no tiene visión confirmada, usa el VISION_POOL.
+    Modelos con visión confirmada: grok-3, grok-3-mini-companion,
+    grok-4-1-non-thinking-companion, todos los grok-plugins-*.
+    imagine-agent-mode* NO tienen visión vía f6.
+    """
+    VISION_CAPABLE = {"grok-3", "grok-3-mini-companion", "grok-4-1-non-thinking-companion"}
+    if requested and (requested in VISION_CAPABLE or requested.startswith("grok-plugins-")):
+        return requested
+    if requested and requested in VISION_ALIASES:
+        return _vision_rotator.next()
+    # Para aliases genéricos (auto, gpt-4o, etc.) con imágenes → VISION_POOL
+    return _vision_rotator.next()
 
 
 # ── Filtro de artefactos XML y ruido interno ──────────────────────────────────

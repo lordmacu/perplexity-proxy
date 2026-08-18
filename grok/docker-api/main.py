@@ -241,11 +241,16 @@ def _upload_images_from_messages(messages: list[dict]) -> list[str]:
 @app.post("/v1/chat/completions", dependencies=[Depends(verify_key)])
 async def chat_completions(req: ChatRequest):
     msgs_raw = [m.model_dump() for m in req.messages]
-    model_id        = backend.resolve_model(req.model)
     prompt, system  = backend.messages_to_prompt(msgs_raw, tools=req.tools)
 
     # Subir imágenes adjuntas (content tipo lista con image_url)
     image_file_ids = _upload_images_from_messages(msgs_raw)
+
+    # Si hay imágenes, usar un modelo con visión confirmada (grok-plugins 999/h)
+    if image_file_ids:
+        model_id = backend.resolve_vision_model(req.model)
+    else:
+        model_id = backend.resolve_model(req.model)
 
     cid = _cid()
 
