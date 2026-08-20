@@ -17,3 +17,9 @@ cache/
 
 # Worker de Cloudflare: tiene su propio repo (lordmacu/perplexity-otp-worker)
 otp-worker/
+
+# grok-proxy is its own repository (lordmacu/grok-proxy), nested here only by
+# accident of where it was first cloned. Two stale copies of its main.py and
+# grok_backend.py had been tracked here since before that split, so a `git add -A`
+# from this directory would commit grok's code into perplexity's repository.
+grok/
