@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 
@@ -66,6 +66,30 @@ app.include_router(v1_conversations.router)                       # ya trae pref
 app.include_router(perplexity.router,    prefix="/perplexity",  tags=["Perplexity Native"])
 app.include_router(v1_search.router,     prefix="/perplexity",  tags=["Perplexity Native"])
 app.include_router(v1_auth.router,       prefix="/perplexity",  tags=["Auth"])
+
+
+# ── Capability gate (spec §3.4) ───────────────────────────────────────────────
+# `capabilities.require` raises 501 -- see its docstring for why not 404 or 503.
+
+# The endpoints for capabilities this proxy reports as false. They exist ONLY
+# so that a client trying them gets 501 rather than FastAPI's generic 404 --
+# there is no implementation behind any of them, which is the point.
+@app.post("/v1/images/generations", tags=["Meta"], summary="No soportado (501)")
+async def images_not_implemented():
+    capabilities.require("images")
+
+
+@app.post("/v1/translate", tags=["Meta"], summary="No soportado (501)")
+async def translate_not_implemented():
+    capabilities.require("translate")
+
+
+@app.api_route("/v1/files", methods=["GET", "POST"], tags=["Meta"],
+               summary="No soportado (501)")
+@app.api_route("/v1/files/{file_id}", methods=["GET", "DELETE"], tags=["Meta"],
+               summary="No soportado (501)")
+async def files_not_implemented(file_id: str = ""):
+    capabilities.require("files")
 
 
 @app.get("/health", tags=["Meta"], summary="Health check")

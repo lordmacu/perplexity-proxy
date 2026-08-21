@@ -195,3 +195,48 @@ def test_a_malformed_cursor_is_a_400_not_a_crash(bad):
     with pytest.raises(Exception) as exc:
         conv._parse_cursor(bad)
     assert getattr(exc.value, "status_code", None) == 400
+
+
+# ── El gate de §3.4 ───────────────────────────────────────────────────────────
+
+def test_a_false_capability_answers_501_not_404():
+    """404 es indistinguible de un error de ruteo, y 503 hace que el gateway
+    reintente algo que nunca iba a funcionar en esta configuración."""
+    from fastapi.testclient import TestClient
+    import main
+
+    client = TestClient(main.app)
+    for method, path in (("post", "/v1/images/generations"),
+                         ("post", "/v1/translate"),
+                         ("post", "/v1/files"),
+                         ("get", "/v1/files"),
+                         ("get", "/v1/files/abc"),
+                         ("delete", "/v1/files/abc")):
+        assert getattr(client, method)(path).status_code == 501, path
+
+
+def test_the_gate_names_the_capability_and_where_to_look():
+    from fastapi.testclient import TestClient
+    import main
+
+    detail = TestClient(main.app).post("/v1/translate").json()["detail"]
+    assert "translate" in detail and "/health" in detail
+
+
+def test_require_passes_for_a_capability_this_proxy_has(monkeypatch):
+    monkeypatch.setattr(capabilities, "snapshot",
+                        lambda: capabilities.SessionState(mode="account"))
+    capabilities.require("conversations")   # no raise
+
+
+def test_require_refuses_when_the_session_is_gone(monkeypatch):
+    """Sin sesión no hay cookie, y sin cookie el endpoint no puede lograr nada:
+    501 es la respuesta honesta, no un 500 más adelante."""
+    import pytest as _pytest
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(capabilities, "snapshot",
+                        lambda: capabilities.SessionState(mode="anonymous"))
+    with _pytest.raises(HTTPException) as exc:
+        capabilities.require("conversations")
+    assert exc.value.status_code == 501

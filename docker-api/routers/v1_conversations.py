@@ -32,6 +32,7 @@ from curl_cffi.requests import AsyncSession
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
+import capabilities
 from auth import require_api_key
 from config import settings, PPLX_HEADERS
 
@@ -203,6 +204,7 @@ async def list_conversations(
     show_archived: bool = Query(False),
     _=Depends(require_api_key),
 ):
+    capabilities.require("conversations")
     offset = _parse_cursor(cursor)
     threads = await _list_threads(
         limit=limit, offset=offset, show_archived=show_archived, search=search,
@@ -332,6 +334,7 @@ no reconoce en vez de inventar contenido.
 """,
 )
 async def get_messages(conversation_id: str, _=Depends(require_api_key)):
+    capabilities.require("conversations")
     data = await _call(
         "GET", f"/rest/thread/{conversation_id}",
         params={

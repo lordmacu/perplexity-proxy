@@ -20,6 +20,7 @@ from auth import require_api_key
 from config import settings, PPLX_HEADERS, VOICE_MAP
 from curl_cffi.requests import AsyncSession
 
+import capabilities
 import soniox
 
 router = APIRouter()
@@ -103,6 +104,7 @@ async def create_speech(
     request: Request,
     _=Depends(require_api_key),
 ):
+    capabilities.require("audio_speech")
     preset = VOICE_MAP.get(body.voice.lower(), "Tylis-mp3")
 
     async with AsyncSession() as session:
@@ -191,6 +193,8 @@ async def create_transcription(
     response_format: str = Form("json", description="✓ `json` o `text`"),
     _=Depends(require_api_key),
 ):
+    capabilities.require("audio_transcription")
+
     audio = await file.read()
     if not audio:
         raise HTTPException(status_code=400, detail="archivo de audio vacío")
