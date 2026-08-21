@@ -93,8 +93,8 @@ Obtiene una API key de Soniox para conectar directamente al WebSocket de transcr
 **Fuente APK:** `u56.java` (CreateSonioxApiKeyRequest) / `t2o.java` (SonioxApiKeyResponse)
 
 **Campos de respuesta:**
-- `apiKey`: token para `wss://stt-rt.soniox.com/transcribe-websocket`
-- `expiresAt`: timestamp de expiración
+- `api_key`: token para `wss://stt-rt.soniox.com/transcribe-websocket`
+- `expires_at`: timestamp de expiración
 
 **Nota:** el endpoint Soniox NO devuelve `first_entry_uuid*` — esos campos solo están en el endpoint Gemini.
 """,

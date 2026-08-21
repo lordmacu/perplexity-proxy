@@ -10,7 +10,11 @@ import logging
 from config import settings
 from token_manager import TokenManager
 from auth_watchdog import watchdog_loop, cargar_token_del_cache
-from routers import v1_chat, v1_audio, v1_models, perplexity, v1_search, v1_auth
+from routers import (
+    v1_chat, v1_audio, v1_models, perplexity, v1_search, v1_auth,
+    v1_conversations,
+)
+import capabilities
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
@@ -58,6 +62,7 @@ app.include_router(v1_chat.router,       prefix="/v1",          tags=["OpenAI �
 app.include_router(v1_search.router,     prefix="/v1",          tags=["OpenAI — Chat"])
 app.include_router(v1_audio.router,      prefix="/v1",          tags=["OpenAI — Audio"])
 app.include_router(v1_models.router,     prefix="/v1",          tags=["OpenAI — Models"])
+app.include_router(v1_conversations.router)                       # ya trae prefix /v1/conversations
 app.include_router(perplexity.router,    prefix="/perplexity",  tags=["Perplexity Native"])
 app.include_router(v1_search.router,     prefix="/perplexity",  tags=["Perplexity Native"])
 app.include_router(v1_auth.router,       prefix="/perplexity",  tags=["Auth"])
@@ -65,7 +70,29 @@ app.include_router(v1_auth.router,       prefix="/perplexity",  tags=["Auth"])
 
 @app.get("/health", tags=["Meta"], summary="Health check")
 async def health():
-    return {"status": "ok"}
+    """The proxy capability contract (llm-libre spec 2026-08-20).
+
+    Unauthenticated and vendor-call-free on purpose (spec 3.1): this is both
+    the gateway's health-sweep target and the container's own health check,
+    and both have to answer even when Perplexity itself is unreachable.
+
+    `capabilities` is EFFECTIVE -- what a request would achieve right now, not
+    what this codebase implements -- so the gateway reads one boolean instead
+    of learning what a Perplexity session is. See capabilities.py.
+
+    The `status: "ok"` key is kept: it was the whole response before the
+    contract landed, and the Dockerfile HEALTHCHECK plus anything else already
+    pointing here must not break on the upgrade.
+    """
+    state = capabilities.snapshot()
+    return {
+        "status":       "ok",
+        "version":      "1.0.0",
+        "contract":     1,
+        "provider":     "perplexity",
+        "auth":         capabilities.auth_block(state),
+        "capabilities": capabilities.effective(state),
+    }
 
 
 @app.get("/", tags=["Meta"], summary="Info del proxy")

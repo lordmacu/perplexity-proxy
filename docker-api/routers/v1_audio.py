@@ -10,15 +10,17 @@ Backend: Perplexity /rest/sse/audio/text_to_speech
 import base64
 import json
 import uuid
-from typing import Literal
+from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from auth import require_api_key
 from config import settings, PPLX_HEADERS, VOICE_MAP
 from curl_cffi.requests import AsyncSession
+
+import soniox
 
 router = APIRouter()
 
@@ -154,3 +156,53 @@ async def create_speech(
         raise HTTPException(status_code=502, detail="No audio data received from Perplexity TTS")
 
     return Response(content=mp3, media_type="audio/mpeg")
+
+
+# ── Speech-to-Text ────────────────────────────────────────────────────────────
+
+@router.post(
+    "/audio/transcriptions",
+    summary="Speech-to-Text",
+    description="""
+Transcribe audio a texto, compatible con la API de OpenAI.
+
+**Backend:** `wss://stt-rt.soniox.com/transcribe-websocket` — el mismo motor que
+usa la app de Perplexity (APK v2.95.0: `e3o.java`, `a4o.java`, `x2o.java`).
+
+**Ojo, esto es distinto del resto del proxy:** la transcripción NO la hace
+Perplexity, la hace **Soniox**, un tercero. Perplexity solo emite la credencial
+(`POST /rest/realtime/v1/transcription/soniox-api-key`). La cuota y la
+disponibilidad son de Soniox.
+
+**Parámetros OpenAI:**
+- ✓ `file` — el audio a transcribir
+- ✓ `language` — se manda como `language_hints` (59 idiomas; ver `soniox.py`)
+- ✓ `prompt` — se manda como `context` de Soniox
+- ✓ `response_format` — `json` (default) o `text`
+- ~ `model` — ignorado; siempre `stt-rt-v4`
+- ✗ `temperature` — no soportado
+""",
+)
+async def create_transcription(
+    file: UploadFile = File(..., description="✓ Audio a transcribir"),
+    model: str = Form("whisper-1", description="~ Ignorado; siempre `stt-rt-v4`"),
+    language: Optional[str] = Form(None, description="✓ Código ISO-639-1, ej. `es`"),
+    prompt: Optional[str] = Form(None, description="✓ Se manda como `context` de Soniox"),
+    response_format: str = Form("json", description="✓ `json` o `text`"),
+    _=Depends(require_api_key),
+):
+    audio = await file.read()
+    if not audio:
+        raise HTTPException(status_code=400, detail="archivo de audio vacío")
+
+    try:
+        api_key = await soniox.fetch_api_key()
+        result = await soniox.transcribe(
+            audio, api_key=api_key, language=language, context=prompt,
+        )
+    except soniox.SonioxError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    if response_format == "text":
+        return Response(content=result.text, media_type="text/plain; charset=utf-8")
+    return {"text": result.text, "language": result.language}
