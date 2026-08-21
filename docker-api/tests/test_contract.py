@@ -240,3 +240,61 @@ def test_require_refuses_when_the_session_is_gone(monkeypatch):
     with _pytest.raises(HTTPException) as exc:
         capabilities.require("conversations")
     assert exc.value.status_code == 501
+
+
+# ── El contrato de audio ──────────────────────────────────────────────────────
+
+def test_the_voices_endpoint_publishes_voices_and_limits():
+    from fastapi.testclient import TestClient
+    import main
+
+    body = TestClient(main.app).get("/v1/audio/voices").json()
+    assert body["max_input_chars"] == 4096
+    assert body["default_format"] == "mp3"
+    assert len(body["voices"]) == 8
+    assert body["default"] in body["voices"]
+
+
+def test_every_openai_alias_points_at_a_real_voice():
+    """Un alias que apunte a una voz inexistente rompería el TTS entero."""
+    from routers import v1_audio
+
+    for native in v1_audio.VOICE_MAP.values():
+        assert native in v1_audio.NATIVE_VOICES
+
+
+def test_a_known_alias_is_mapped_not_randomised():
+    from routers import v1_audio
+
+    assert v1_audio.resolve_voice("alloy") == ("Tylis-mp3", False)
+
+
+def test_a_native_name_passes_through():
+    from routers import v1_audio
+
+    assert v1_audio.resolve_voice("Gravo-mp3") == ("Gravo-mp3", False)
+
+
+def test_an_empty_voice_is_the_default_not_a_random_one():
+    from routers import v1_audio
+
+    assert v1_audio.resolve_voice("") == (v1_audio.DEFAULT_VOICE, False)
+
+
+def test_an_unknown_voice_picks_a_real_one_at_random():
+    """Decisión del operador: audio en una voz cualquiera antes que un rechazo."""
+    from routers import v1_audio
+
+    for _ in range(20):
+        chosen, substituted = v1_audio.resolve_voice("no-existe")
+        assert chosen in v1_audio.NATIVE_VOICES
+        assert substituted is True
+
+
+def test_the_random_choice_is_reported_never_silent():
+    """El costo de elegir al azar es que la misma petición puede sonar distinta;
+    la sustitución tiene que ser visible para que eso no confunda."""
+    from routers import v1_audio
+
+    assert v1_audio.resolve_voice("no-existe")[1] is True
+    assert v1_audio.resolve_voice("alloy")[1] is False

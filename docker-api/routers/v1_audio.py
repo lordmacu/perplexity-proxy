@@ -9,6 +9,7 @@ Backend: Perplexity /rest/sse/audio/text_to_speech
 
 import base64
 import json
+import random
 import uuid
 from typing import Literal, Optional
 
@@ -26,6 +27,37 @@ import soniox
 router = APIRouter()
 
 TTS_URL = f"{settings.pplx_base}/rest/sse/audio/text_to_speech"
+
+# ── El contrato de audio, común a los cinco proxies ──────────────────────────
+# 4096 es el límite de la API de OpenAI. Acá ya se declaraba en el esquema; se
+# publica ahora en /v1/audio/voices para que un cliente pueda preguntarlo en vez
+# de descubrirlo con un 422.
+MAX_INPUT_CHARS = 4096
+SUPPORTED_FORMATS = ("mp3",)
+
+# Las 8 voces nativas de Perplexity, deducidas de los valores de VOICE_MAP.
+NATIVE_VOICES = tuple(sorted(set(VOICE_MAP.values())))
+DEFAULT_VOICE = "Tylis-mp3"
+
+
+def resolve_voice(voice: str) -> tuple[str, bool]:
+    """Devuelve (voz_nativa, hubo_sustitución).
+
+    Una voz desconocida NO es un error acá: se elige una al azar entre las
+    nativas. Es una decisión deliberada del operador -- prefiere audio en una
+    voz cualquiera antes que un rechazo -- y tiene un costo que conviene tener
+    presente: la misma petición repetida puede sonar distinta. Por eso la
+    sustitución se informa en cabeceras (`X-Voice-Fallback`, `X-Voice-Used`) en
+    lugar de ocurrir en silencio, que era el comportamiento anterior.
+    """
+    name = (voice or "").strip().lower()
+    if not name:
+        return DEFAULT_VOICE, False
+    if voice in NATIVE_VOICES:
+        return voice, False
+    if name in VOICE_MAP:
+        return VOICE_MAP[name], False
+    return random.choice(NATIVE_VOICES), True
 
 
 class SpeechRequest(BaseModel):
@@ -74,6 +106,24 @@ class SpeechRequest(BaseModel):
     )
 
 
+@router.get("/audio/voices", summary="Voces y límites de TTS")
+def list_voices():
+    """Lo que este proxy acepta para texto a voz. Estándar en los cinco.
+
+    No existía forma de preguntarlo, que es precisamente por qué se terminó
+    mandando una voz que dos de los cinco proxies no tenían.
+    """
+    return {
+        "default": DEFAULT_VOICE,
+        "voices": list(NATIVE_VOICES),
+        "openai_aliases": VOICE_MAP,
+        "selection": "random",
+        "max_input_chars": MAX_INPUT_CHARS,
+        "formats": list(SUPPORTED_FORMATS),
+        "default_format": "mp3",
+    }
+
+
 @router.post(
     "/audio/speech",
     summary="Text-to-Speech",
@@ -105,7 +155,15 @@ async def create_speech(
     _=Depends(require_api_key),
 ):
     capabilities.require("audio_speech")
-    preset = VOICE_MAP.get(body.voice.lower(), "Tylis-mp3")
+
+    if len(body.input) > MAX_INPUT_CHARS:
+        raise HTTPException(status_code=400, detail={"error": {
+            "type": "invalid_request_error",
+            "message": f"input is {len(body.input)} characters, the limit is {MAX_INPUT_CHARS}",
+            "param": "input",
+            "max_input_chars": MAX_INPUT_CHARS}})
+
+    preset, substituted = resolve_voice(body.voice)
 
     async with AsyncSession() as session:
         response = await session.post(
@@ -157,7 +215,10 @@ async def create_speech(
     if not mp3:
         raise HTTPException(status_code=502, detail="No audio data received from Perplexity TTS")
 
-    return Response(content=mp3, media_type="audio/mpeg")
+    headers = {"X-Voice-Used": preset}
+    if substituted:
+        headers["X-Voice-Fallback"] = body.voice
+    return Response(content=mp3, media_type="audio/mpeg", headers=headers)
 
 
 # ── Speech-to-Text ────────────────────────────────────────────────────────────
