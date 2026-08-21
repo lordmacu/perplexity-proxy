@@ -47,7 +47,7 @@ se equivoca en dos puntos comprobados:
 | Ruta nuestra | Backend | Declaración |
 |---|---|---|
 | `GET /v1/conversations` | `POST /rest/thread/list_ask_threads` | `jkp.java:76`, cuerpo `bkk.java`, respuesta `xll.java` |
-| `GET /v1/conversations/{id}` | el mismo listado, buscando por `uuid` | — |
+| `GET /v1/conversations/{id}` | el mismo listado, paginando hasta el `uuid` | — |
 | `GET /v1/conversations/{id}/messages` | `GET /rest/thread/{backend_uuid_or_slug}` | `cjp.java:15`, respuesta `cdk.java` |
 
 **Por qué el detalle no usa la ruta de detalle:** `GET /rest/thread/{uuid}`
@@ -55,6 +55,15 @@ devuelve `{entries, background_entries, has_next_page, next_cursor,
 thread_metadata}`, y ese `thread_metadata` solo contiene `crons` (`nml.java`).
 No trae título, ni fecha, ni estado de pin — los únicos campos que promete
 `ConversationItem` están en el listado.
+
+**Paginación, y por qué casi se pierde.** El cuerpo lleva `limit` y `offset`
+(`bkk.java:16-17`), y funcionan: dos páginas contiguas de 5 devolvieron uuids
+disjuntos. Casi se me escapan — jadx los dejó como referencias a constantes
+(`MapboxMap.QFE_LIMIT` / `QFE_OFFSET`) en vez de literales, así que la primera
+lectura del descriptor solo mostró cinco de los siete campos. Sin ellos el
+endpoint devolvía siempre los mismos 20 hilos **y afirmaba que eran todos**:
+`has_next_page` venía `true` en los 20. `next_cursor` es el offset de la página
+siguiente, opaco para quien llama.
 
 **Dos capas de JSON.** Las entries no tienen esquema estático: `szb.java` las
 deserializa como `Map<String, JsonElement>` y el cliente Android las interpreta

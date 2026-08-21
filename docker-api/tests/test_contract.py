@@ -177,3 +177,21 @@ def test_collect_ignores_non_final_hypotheses():
 def test_collect_reports_no_language_when_soniox_sends_none():
     """stt-rt-v4 no puebla `language`; se reporta eso, no el hint del que llama."""
     assert soniox._collect([{"tokens": [{"text": "x", "is_final": True}]}]).language is None
+
+
+# ── Paginación ────────────────────────────────────────────────────────────────
+
+def test_cursor_absent_starts_at_the_beginning():
+    assert conv._parse_cursor(None) == 0
+    assert conv._parse_cursor("") == 0
+
+
+def test_cursor_is_the_offset_of_the_next_page():
+    assert conv._parse_cursor("40") == 40
+
+
+@pytest.mark.parametrize("bad", ["abc", "-1", "1.5", "0x10"])
+def test_a_malformed_cursor_is_a_400_not_a_crash(bad):
+    with pytest.raises(Exception) as exc:
+        conv._parse_cursor(bad)
+    assert getattr(exc.value, "status_code", None) == 400

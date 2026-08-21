@@ -44,6 +44,11 @@ BASE = settings.pplx_base
 _SOURCE = "android"
 _APK_VERSION = "2.95.0"
 
+# Tope de páginas que recorre la búsqueda por id. 100 x 20 = 20 000 hilos, muy
+# por encima de cualquier cuenta real; existe para que un backend que nunca
+# devuelva una página corta no deje la petición girando para siempre.
+_MAX_LOOKUP_PAGES = 20
+
 
 # ── Forma de respuesta (idéntica a mistral-proxy) ─────────────────────────────
 
@@ -126,8 +131,24 @@ def _thread_to_item(t: dict) -> ConversationItem:
     )
 
 
-async def _list_threads(*, show_archived: bool, search: Optional[str]) -> list[dict]:
-    body: dict = {"ascending": False, "show_archived": show_archived}
+async def _list_threads(
+    *, limit: int, offset: int, show_archived: bool, search: Optional[str],
+) -> list[dict]:
+    """Una página del listado.
+
+    `limit` y `offset` son reales y están medidos: dos páginas contiguas de 5
+    devolvieron uuids disjuntos. No aparecían en la primera lectura del
+    descriptor porque jadx los dejó como referencias a constantes
+    (`MapboxMap.QFE_LIMIT` / `QFE_OFFSET` en bkk.java:16-17) en vez de
+    literales -- sin ellos este endpoint devolvía siempre los mismos 20 hilos
+    y juraba que eran todos.
+    """
+    body: dict = {
+        "ascending": False,
+        "limit": limit,
+        "offset": offset,
+        "show_archived": show_archived,
+    }
     if search:
         body["search_term"] = search
     data = await _call(
@@ -142,6 +163,23 @@ async def _list_threads(*, show_archived: bool, search: Optional[str]) -> list[d
     return data if isinstance(data, list) else []
 
 
+def _parse_cursor(cursor: Optional[str]) -> int:
+    """El cursor es el `offset` de la próxima página, como string.
+
+    Opaco para quien llama, igual que en mistral-proxy: si mañana el backend
+    cambia a un token de verdad, cambia esta función y nadie más se entera.
+    """
+    if not cursor:
+        return 0
+    try:
+        value = int(cursor)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"cursor inválido: {cursor}")
+    if value < 0:
+        raise HTTPException(status_code=400, detail=f"cursor inválido: {cursor}")
+    return value
+
+
 # ── Rutas ─────────────────────────────────────────────────────────────────────
 
 @router.get(
@@ -149,24 +187,35 @@ async def _list_threads(*, show_archived: bool, search: Optional[str]) -> list[d
     response_model=ConversationList,
     summary="Listar conversaciones",
     description="""
-Lista los hilos de la cuenta.
+Lista los hilos de la cuenta, paginado.
 
-**Backend:** `POST /rest/thread/list_ask_threads` (jkp.java:76 del APK v2.95.0).
+**Backend:** `POST /rest/thread/list_ask_threads` (jkp.java:76 del APK v2.95.0),
+con `limit`/`offset` en el cuerpo (bkk.java:16-17).
 
-El backend devuelve la lista completa sin paginación por request, así que
-`limit` recorta del lado del proxy y `next_cursor` siempre es `null`.
+`next_cursor` viene con el offset de la página siguiente, o `null` si esta es la
+última. Se pasa tal cual en `cursor` para seguir.
 """,
 )
 async def list_conversations(
     limit: int = Query(20, ge=1, le=100),
+    cursor: Optional[str] = Query(None, description="`next_cursor` de la respuesta anterior"),
     search: Optional[str] = Query(None, description="Filtra por `search_term` upstream"),
     show_archived: bool = Query(False),
     _=Depends(require_api_key),
 ):
-    threads = await _list_threads(show_archived=show_archived, search=search)
+    offset = _parse_cursor(cursor)
+    threads = await _list_threads(
+        limit=limit, offset=offset, show_archived=show_archived, search=search,
+    )
+    items = [_thread_to_item(t) for t in threads if isinstance(t, dict)]
+
+    # `has_next_page` viene por hilo, no por página; se toma del primero. Si la
+    # página volvió vacía o incompleta ya no hay más, sin importar qué diga.
+    more = bool(threads and len(threads) >= limit
+                and isinstance(threads[0], dict) and threads[0].get("has_next_page"))
     return ConversationList(
-        data=[_thread_to_item(t) for t in threads[:limit] if isinstance(t, dict)],
-        next_cursor=None,
+        data=items,
+        next_cursor=str(offset + limit) if more else None,
     )
 
 
@@ -175,7 +224,8 @@ async def list_conversations(
     response_model=ConversationItem,
     summary="Metadata de una conversación",
     description="""
-**Backend:** `POST /rest/thread/list_ask_threads`, buscando por `uuid`.
+**Backend:** `POST /rest/thread/list_ask_threads`, paginando hasta encontrar el
+`uuid`.
 
 Deliberadamente NO usa `GET /rest/thread/{backend_uuid_or_slug}`: esa ruta
 devuelve `{entries, background_entries, has_next_page, next_cursor,
@@ -185,9 +235,16 @@ esta respuesta promete viven en el listado.
 """,
 )
 async def get_conversation(conversation_id: str, _=Depends(require_api_key)):
-    for t in await _list_threads(show_archived=True, search=None):
-        if isinstance(t, dict) and t.get("uuid") == conversation_id:
-            return _thread_to_item(t)
+    page_size = 100
+    for page in range(_MAX_LOOKUP_PAGES):
+        threads = await _list_threads(
+            limit=page_size, offset=page * page_size, show_archived=True, search=None,
+        )
+        for t in threads:
+            if isinstance(t, dict) and t.get("uuid") == conversation_id:
+                return _thread_to_item(t)
+        if len(threads) < page_size:
+            break
     raise HTTPException(status_code=404, detail=f"conversación no encontrada: {conversation_id}")
 
 
