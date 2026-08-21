@@ -1,20 +1,49 @@
-version: '3.9'
-
+# Dos volúmenes, y el importante es `cache`.
+#
+# Este proxy guarda su token de sesión en /app/cache/session_token.txt (y el de
+# Gemini en gemini_token.json). Ese directorio lo crea el Dockerfile, así que
+# vive en la capa efímera: CADA REDESPLIEGUE borraba la sesión y obligaba a
+# re-loguearse por OTP. Persistirlo es la diferencia entre un deploy silencioso
+# y uno que necesita que alguien lea un código de un email.
+#
+# `data` se monta por consistencia con los otros cuatro proxies: es la ruta
+# estándar de la flota para lo que deba sobrevivir.
+#
+# Con el build pack `dockerfile` esto era configuración de la aplicación:
+# creada a mano una vez por app, y perdida si la app se recreaba. `VOLUME` en
+# el Dockerfile tampoco alcanza — Docker crea un volumen ANÓNIMO nuevo por
+# contenedor, así que documenta la intención sin persistir nada.
+#
+# Las variables se enumeran una por una: Coolify sustituye las que el compose
+# nombra, y una que falte acá no llega al contenedor. El fallo aparecería en
+# runtime como "no autenticado", no como un error de arranque.
 services:
-  api:
+  perplexity:
     build: .
-    container_name: perplexity-proxy
     ports:
-      - "8000:8000"
-    env_file: .env
+      - "8891:8000"
+    environment:
+      - PERPLEXITY_SESSION=${PERPLEXITY_SESSION:-}
+      - PERPLEXITY_EMAIL=${PERPLEXITY_EMAIL:-}
+      - PROXY_API_KEY=${PROXY_API_KEY:-}
+      - DEFAULT_VOICE=${DEFAULT_VOICE:-}
+      - AUTH_WATCHDOG=${AUTH_WATCHDOG:-}
+      - SESSION_CHECK_INTERVAL=${SESSION_CHECK_INTERVAL:-}
+      - OTP_WORKER_URL=${OTP_WORKER_URL:-}
+      - OTP_SECRET=${OTP_SECRET:-}
+      - MAILGUN=${MAILGUN:-}
     volumes:
-      - token_cache:/app/cache
+      - perplexity-cache:/app/cache
+      - perplexity-data:/app/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 20s
 
 volumes:
-  token_cache:
+  perplexity-cache:
+  perplexity-data:
